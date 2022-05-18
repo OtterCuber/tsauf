@@ -21,12 +21,11 @@ library(reactablefmtr)
 library(sparkline)
 library(shinycssloaders)
 library(kit)
+library(tictoc)
 
 # Re-Read Project-Level Environmental Variables
 readRenviron(".Renviron")
 gs4_e <- Sys.getenv("gs4_e")
-
-# library(Rfast) # for fastest theoretical
 
 # # Code to generate cases.csv and pll.csv
 # # Alg is in standard notation, while Alg2 converts S' to B'Fz' and S to BF'z for cubing() to work
@@ -93,6 +92,38 @@ gs4_e <- Sys.getenv("gs4_e")
 cases <- vroom("cases.csv", show_col_types = F)
 PLL <- vroom("pll.csv", show_col_types = F)
 
+# Manual case creation (probably too slow for all 8,000 cases)
+PreRot <- c("", "y", "y2", "y'")
+PreAUF <- c("", "U", "U2", "U'")
+PostRot <- c("", "y", "y2", "y'")
+CN <- c("", "x", "x2", "x'", "z", "z'")
+get_cases <- function(cn = F) {
+  cases <- PLL %>%
+    select(PLL, Alg2) %>%
+    dplyr::slice(sample(1:n())) %>%
+    rowwise() %>%
+    mutate(moves = paste0(sample(PreRot, 1), sample(PreAUF, 1), Alg2, sample(PostRot, 1), ifelse(cn, sample(CN, 1), ""))) %>%
+    mutate(TruncatedCaseURL = paste0("visualcube.php?size=175&case=", moves)) %>%
+    mutate(invmoves = cubing::invMoves(moves, collapse = "")) %>%
+    mutate(TruncatedCaseURL = str_replace_all(TruncatedCaseURL, "'", "\\\\'")) %>% # Necessary for string insertion in VisualCube TS: this changes ' to \' (https://github.com/STAT545-UBC/Discussion/issues/394)
+    ungroup()
+  # print(cases$PLL) # Debug
+  return(cases)
+}
+
+# Display cube
+display_cube <- function(options = "visualcube.php?size=175") {
+  shinyjs::runjs(paste0(
+    "$( document ).ready(function() {
+    const element = document.getElementById('visualcube')
+    const SRVisualizer = window['sr-visualizer'];
+    element.removeChild(element.lastElementChild);
+    SRVisualizer.cubeSVG(element, '",
+    options,
+    "')})"
+  ))
+}
+
 # Tips
 tips <- c(
   "Tip: Input your name in settings to save your time!",
@@ -130,12 +161,18 @@ get_topn <- function(v) {
   ))
 }
 
-# get_fastest_theoretical_time <- function(name) {
-#   if(!(name %in% df_records$Name)) return(NA)
-#   tmp <- matrix(unlist(df_records %>% filter(Name == name) %>% pull(Recognition)), ncol = 21)
-#   return(sum(Rfast::colMins(tmp, value = T)))
-# }
-# get_fastest_theoretical_time("Guest")
+library(Rfast) # for fastest theoretical
+# library(tictoc)
+get_fastest_theoretical_time <- function(name) {
+  if(!(name %in% df_records$Name)) return(NA)
+  tmp <- matrix(unlist(df_records %>% filter(Name == name) %>% pull(Recognition)), ncol = 21)
+  mins <- Rfast::colMins(tmp, value = T)
+  mins_sum <- sum(mins)
+  return(list(times = mins, sum = mins_sum))
+}
+# tic()
+# get_fastest_theoretical_time("zzoomer")
+# toc()
 
 
 # Call thematic_shiny() prior to launching the app, to change
@@ -259,15 +296,14 @@ ui <-
       # Include javascript dependencies for keys
       useKeys(),
       keysInput(inputId = "keys", keys = c(
-        "a a", "a b", "e", "f", "g a", "g b", "g c", "g d", "h", "j a", "j b", "n a", "n b",
-        "r a", "r b", "t", "u a", "u b", "v", "y", "z", "A a", "A b", "E", "F", "G a", "G b",
-        "G c", "G d", "H", "J a", "J b", "N a", "N b", "R a", "R b", "T", "U a", "U b", "V",
-        "Y", "Z", "1", "2", "3", "4", "7", "8", "9", "0", "enter"
+        "a a", "a b", "e", "f", "g a", "g b", "g c", "g d", "h", "j a", "j b", "n a", 
+        "n b", "r a", "r b", "t", "u a", "u b", "v", "y", "z", "A a", "A b", "E", "F",
+        "G a", "G b", "G c", "G d", "H", "J a", "J b", "N a", "N b", "R a", "R b", "T",
+        "U a", "U b", "V", "Y", "Z", "1", "2", "3", "4", "7", "8", "9", "0", "enter"
       ), global = F),
       br(),
 
       # Start button
-      # shinyWidgets::actionBttn(inputId = "Start", label = "Start", style = "simple", color = "primary"),
       dipsaus::actionButtonStyled(inputId = "Start", label = "Start", type = "primary"),
       br(),
       br(),
@@ -313,7 +349,7 @@ ui <-
         size = "lg",
         individual = T
       ),
-    ), # End Trainer
+    ),
 
     # Settings
     tabPanel("",
@@ -352,20 +388,19 @@ ui <-
             choiceNames = c("PLL-Only Speedrun (21 Cases)", "Classic Speedrun (21 cases)", "Color-Neutral Speedrun (21 Cases)", "Custom Practice"),
             choiceValues = c("mode_pll", "mode_classic", "mode_cn", "mode_untimed")
           ),
-        ), # end sidebarpanel
+        ),
 
         mainPanel(
-          # List default PLL algs
           h2("Default PLL Algorithms"),
           "To use your own algorithms, paste them into the textbox on the left. The algorithms must be arranged in alphabetical order of their respective PLL names (Aa, Ab, E, etc.) and separated by commas.",
           reactableOutput("table"),
           h2("Custom PLL Algorithms"),
           reactableOutput("custom_table")
-        ) # end mainpanel
-      ) # End sidebarlayout
-    ), # End Settings
+        )
+      )
+    ),
 
-    # tabPanel("Records",
+    # Records
     tabPanel("",
       icon = icon("crown"), value = "Records",
       h2("PLL-Only (Perfect Runs)"),
@@ -380,11 +415,10 @@ ui <-
       h2("CN Mode"),
       plotlyOutput("plot_cn", height = "200px") %>% spin(),
       reactableOutput("table_cn"),
-    ), # End Records
+    ),
 
     tabPanel("",
       icon = icon("info"), value = "About",
-      # List default PLL algs
       h2("About"),
       "PLL Recognition Time Attack is a two-side PLL recognition and AUF trainer with the following modes:",
       tags$ul(
@@ -409,7 +443,7 @@ ui <-
         HTML("<li>Matias Macaya ('SpeedCuber') for testing</li>"),
         HTML("<li>Alex Davison ('zzoomer') for design and testing</li>")
       ),
-    ) # End About
+    )
   )
 
 # https://stackoverflow.com/questions/50604908/image-output-in-shiny-app
@@ -427,9 +461,6 @@ server <- function(input, output, session) {
 
   # Create a reactive val to determine if another case should be displayed
   case_counter <- reactiveVal(0)
-
-  # Reactive val for spacebar start/stop toggle
-  spacebar_toggle <- reactiveVal(0)
 
   # Create reactive val for storing time for each PLL case
   case_time <- reactiveVal(tibble(PLL = PLL$PLL, Start = NA, Diff = NA))
@@ -514,24 +545,6 @@ server <- function(input, output, session) {
         "0" = updateRadioGroupButtons(session, "post_auf_choice", selected = "U2")
       )
     }
-
-    # # Always listen to spacebar toggles
-    # if(input$keys == "space") {
-    #   # If the game is in progress, stop it
-    #   if(spacebar_toggle() == 1) {
-    #     spacebar_toggle(0)
-    #     print(spacebar_toggle())
-    #     print("Shutting game down...")
-    #   }
-    #
-    #   # If the game is not in progress, start it
-    #   if(spacebar_toggle() == 0) {
-    #     spacebar_toggle(1)
-    #     print(spacebar_toggle())
-    #     print("Starting game...")
-    #   }
-    # }
-    # print(input$keys)
   })
 
   # Format custom algs
@@ -634,11 +647,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # Show Button Selections
-  # output$total_user_input <- renderText({
-  #   glue("{input$pre_auf_choice} {input$pll_choice} {input$post_auf_choice}", .na = "", .null = "")
-  # })
-
   # Monitor the training mode selection
   observeEvent(input$training_mode, {
 
@@ -647,7 +655,7 @@ server <- function(input, output, session) {
       updatePickerInput(session = session, inputId = "pll_case_selection", selected = PLL$PLL)
       shinyjs::disable("pll_case_selection")
 
-      # If untimed mode is selected, enable the picker (not sure why first line is needed)
+    # If untimed mode is selected, enable the picker (not sure why first line is needed)
     } else {
       updatePickerInput(session = session, inputId = "pll_case_selection", selected = PLL$PLL)
       shinyjs::enable("pll_case_selection")
@@ -703,30 +711,10 @@ server <- function(input, output, session) {
       }
 
       # If classic mode or PLL mode, then select one white-cross case for each PLL (21)
-      if (input$training_mode %in% c("mode_classic", "mode_pll")) {
-        cases_subset(
-          cases %>%
-            filter(cross_color == "white") %>%
-            group_by(PLL) %>%
-            slice_sample(n = 1) %>%
-            ungroup() %>%
-            dplyr::slice(sample(1:n())) # randomly shuffle
-        )
-
-        # print(glue_collapse(cases_subset()$PLL, sep = ", ")) # Cheat
-      }
+      if (input$training_mode %in% c("mode_classic", "mode_pll")) { cases_subset(get_cases(cn = F)) }
 
       # If CN mode is selected, then select 21 random cross cases
-      if (input$training_mode == "mode_cn") {
-        # Select 21 random cases from all cross colors
-        cases_subset(
-          cases %>%
-            group_by(PLL) %>%
-            slice_sample(n = 1) %>%
-            ungroup() %>%
-            dplyr::slice(sample(1:n())) # randomly shuffle
-        )
-      }
+      if (input$training_mode == "mode_cn") { cases_subset(get_cases(cn = T)) }
 
       # If untimed mode, select all white cross cases using the PLL case(s) in the picker (as few as 64 cases)
       if (input$training_mode == "mode_untimed") {
@@ -755,68 +743,9 @@ server <- function(input, output, session) {
       # Debug
       # print(glue("=====Mode {input$training_mode} has started. Cases: {nrow(cases_subset())}====="))
 
-      # If the start button is pressed, but the game has already started, then stop
+    # If the start button is pressed, but the game has already started, then stop
     } else {
-
-      # Reset case image
-      shinyjs::runjs("$( document ).ready(function() {
-      const element = document.getElementById('visualcube')
-      const SRVisualizer = window['sr-visualizer'];
-      element.removeChild(element.lastElementChild);
-      SRVisualizer.cubeSVG(element, 'visualcube.php?size=175')})")
-
-      # Provide tip
-      output$output_final_time <- renderText({
-        sample(tips, 1)
-      })
-      # Clear time output
-      # output$output_final_time <- renderText({ "" })
-
-      # Set crown to TRUE again
-      otter_crown(T)
-      # print("Crown set to T")
-
-      # Change button text to "Start"
-      updateActionButtonStyled(session = session, inputId = "Start", label = "Start")
-
-      # Reset game counter
-      # print("Counter reset to 0.")
-      case_counter(0)
-
-      # Reset times
-      case_time(tibble(PLL = PLL$PLL, Start = NA, Diff = NA))
-
-
-
-      # Reset PLL buttons for all training modes
-      updateRadioGroupButtons(session = session, inputId = "pll_choice", selected = character(0))
-
-      # Disable AUF buttons if pll mode, otherwise reset them
-      if (input$training_mode == "mode_pll") {
-        shinyWidgets::updateRadioGroupButtons(session, "pre_auf_choice", disabled = T)
-        shinyWidgets::updateRadioGroupButtons(session, "post_auf_choice", disabled = T)
-      } else {
-        updateRadioGroupButtons(session = session, inputId = "pre_auf_choice", selected = "")
-        updateRadioGroupButtons(session = session, inputId = "post_auf_choice", selected = "")
-      }
-
-      # print(input$pre_auf_choice)
-      # print(input$pll_choice)
-      # print(input$post_auf_choice)
-
-      # If picker contains cases, reset the cases to the current selection
-      if (!is.null(input$pll_case_selection)) {
-        # print("Setting case_subset to current selection of pll's")
-        cases_subset(
-          cases %>%
-            filter(PLL %in% input$pll_case_selection)
-        )
-
-        # If the picker does not have any cases selected, reset to full set of cases
-      } else {
-        cases_subset(cases) # setting this to an empty tibble() triggered an error
-        # print("Resetting cases_subset to full set of cases")
-      }
+      endgame_procedure(input, output, session, all_cases_solved = F)
     }
   }
 
@@ -857,16 +786,7 @@ server <- function(input, output, session) {
       # print(glue("Displaying #{case_counter()}/{nrow(cases_subset())} case. Filename: {cases_subset()$CaseFilename[case_counter()]}. Invmoves: {cases_subset()$invmoves[case_counter()]}."))
 
       # Display case
-      shinyjs::runjs(paste0(
-        "
-        $( document ).ready(function() {
-          const element = document.getElementById('visualcube')
-          const SRVisualizer = window['sr-visualizer'];
-          element.removeChild(element.lastElementChild);",
-        "SRVisualizer.cubeSVG(element, '",
-        cases_subset()$TruncatedCaseURL[case_counter()],
-        "')})"
-      ))
+      display_cube(cases_subset()$TruncatedCaseURL[case_counter()])
 
       # If not untimed mode, set start time for the current case
       if (input$training_mode != "mode_untimed") {
@@ -882,29 +802,34 @@ server <- function(input, output, session) {
       }
     }
 
-    # If the counter is zero, reset
-    if (case_counter() == 0) {
-      case_time(tibble(PLL = PLL$PLL, Start = NA, Diff = NA))
-      updateActionButtonStyled(session = session, inputId = "Start", label = "Start")
-    }
   })
 
-  endgame_procedure <- function(input, output, session) {
-    # Reset counter and case_time
+  # Reset counter, case time, cube img, crown status, and buttons
+  endgame_procedure <- function(input, output, session, all_cases_solved = T) {
     case_counter(0)
-    # print("Counter reset to 0.")
     case_time(tibble(PLL = PLL$PLL, Start = NA, End = NA, Diff = rep(as.numeric(0), 21)))
-
-    # Reset case image
-    shinyjs::runjs("$( document ).ready(function() {
-            const element = document.getElementById('visualcube')
-            const SRVisualizer = window['sr-visualizer'];
-            element.removeChild(element.lastElementChild);
-            SRVisualizer.cubeSVG(element, 'visualcube.php?size=175')})")
-
-    # Reset crown
+    display_cube()
     otter_crown(T)
-    # print("Crown set to T")
+    updateActionButtonStyled(session = session, inputId = "Start", label = "Start")
+    
+    # For all training modes, de-select PLL buttons
+    updateRadioGroupButtons(session = session, inputId = "pll_choice", selected = character(0))
+    
+    # If PLL-Only, disable AUF buttons, else de-select
+    if (input$training_mode == "mode_pll") {
+      shinyWidgets::updateRadioGroupButtons(session, "pre_auf_choice", disabled = T)
+      shinyWidgets::updateRadioGroupButtons(session, "post_auf_choice", disabled = T)
+    } else {
+      updateRadioGroupButtons(session = session, inputId = "pre_auf_choice", selected = "")
+      updateRadioGroupButtons(session = session, inputId = "post_auf_choice", selected = "")
+    }
+    
+    # Provide tip if premature endgame
+    if(!all_cases_solved) {
+      output$output_final_time <- renderText({
+        sample(tips, 1)
+      })
+    }
   }
 
   save_record <- function(input, output, session) {
@@ -957,9 +882,9 @@ server <- function(input, output, session) {
         # print(glue("Solving cube with the following solution: {full_solution}"))
         c3 <- cubing::move(c2, full_solution)
         result <- is.solved(c3)
-        #
-        # # get solution
-        # print(solver(c3))
+
+        # # Print solution
+        # print(solver(c3)) # Debug
 
         # If the user selection/solution solves the cube
         if (result) {
@@ -967,7 +892,7 @@ server <- function(input, output, session) {
           # Get the end time immediately
           endtime <- Sys.time()
 
-          # For the timed classic and CN modes, save the end time
+          # For the timed classic and CN modes, save the end time for the current PLL
           if (input$training_mode %in% c("mode_classic", "mode_cn")) {
             starttime <- (case_time() %>% filter(PLL == cases_subset()$PLL[case_counter()]) %>% pull(Start))[[1]]
             mydiff <- as.numeric(difftime(endtime, starttime, units = "sec"))
@@ -990,21 +915,20 @@ server <- function(input, output, session) {
           if (case_counter() > num_cases()) {
             # print(glue("Counter: {case_counter()}. Target {num_cases()}."))
 
-            # If classic or CN mode, notify final time, and times in Google Sheets
+            # If classic or CN mode, notify final time, and save times in Google Sheets
             if (input$training_mode %in% c("mode_classic", "mode_cn")) {
               save_record(input, output, session)
 
-              # Display "Nice work!" if untimed mode
+            # If untimed mode, display "Nice work!"
             } else if (input$training_mode == "mode_untimed") {
               output$output_final_time <- renderText({
-                glue("Nice work!")
+                "Nice work!"
               })
             }
-
+            
+            # Initiate endgame procedure
             endgame_procedure(input, output, session)
 
-            # Provide tip
-            # output$output_final_time <- renderText({ sample(tips, 1) })
           } # End if (case_counter() > num_cases())
         } else {
 
@@ -1106,13 +1030,14 @@ server <- function(input, output, session) {
       df_recs <- googlesheets4::read_sheet(sheet_id, col_types = "ccTdcc")
 
       # Update reactiveVal with number of rows
-      # the bindCache() functions will save outputs with a unique username and record_rows()
-      # If either of those values change (e.g., a new speedrun record generated or a different name specified), a new cache will be created
+      # bindCache() functions will save outputs with a unique username and record_rows()
+      # If either of those values change (e.g., a new record generated in any session or
+      # or a different name specified in this session, a new cache will be created)
       record_rows(nrow(df_recs))
 
-      # Calculate slowest, fastest, and format times for sparkline (Note that missing
-      # data must be NULL for sparkline:
-      # https://github.com/htmlwidgets/sparkline/issues/27)
+      # Calculate slowest, fastest, and format times for sparkline
+      # Note: Missing data must be NULL for sparklines:
+      # https://github.com/htmlwidgets/sparkline/issues/27
       df_records <- df_recs %>%
         rowwise() %>%
         mutate(SFR = list(get_topn(CaseTimes))) %>%
