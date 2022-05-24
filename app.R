@@ -479,11 +479,6 @@ server <- function(input, output, session) {
   # Set number of cases
   num_cases <- reactiveVal(21)
 
-  # Initialize cube image
-  output$pll_ui <- renderUI({
-    img(src = "cube.png")
-  })
-
   # Listen to keys
   observeEvent(input$keys, {
 
